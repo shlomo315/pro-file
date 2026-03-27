@@ -56,6 +56,18 @@ export default function App() {
     }
   };
 
+  const downloadPhoto = () => {
+    if (!capturedImage) {
+      setMessage("אין תמונה להורדה");
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = capturedImage;
+    link.download = "best-angle-photo.png";
+    link.click();
+  };
+
   return (
     <div
       style={{
@@ -65,6 +77,7 @@ export default function App() {
         alignItems: "center",
         background: "#f3f4f6",
         fontFamily: "Arial, sans-serif",
+        padding: 20,
       }}
     >
       <div
@@ -105,7 +118,7 @@ export default function App() {
 
         <p style={{ minHeight: 24 }}>{message}</p>
 
-        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <button
             onClick={startCamera}
             style={{
@@ -132,6 +145,20 @@ export default function App() {
             }}
           >
             Take Photo
+          </button>
+
+          <button
+            onClick={downloadPhoto}
+            style={{
+              padding: "12px 16px",
+              borderRadius: 12,
+              border: "none",
+              background: "#16a34a",
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            Download Photo
           </button>
         </div>
 
