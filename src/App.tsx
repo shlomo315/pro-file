@@ -3,7 +3,8 @@ import { FilesetResolver, FaceLandmarker } from "@mediapipe/tasks-vision";
 
 export default function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const animationRef = useRef<number | null>(null);
 
   const [message, setMessage] = useState("טוען מערכת זיהוי...");
@@ -63,15 +64,17 @@ export default function App() {
 
       setCameraStarted(true);
       setMessage("המצלמה פועלת ✅");
-
-      if (faceLandmarker) {
-        startGuidanceLoop();
-      }
     } catch (error) {
       console.error(error);
       setMessage("לא הצלחתי לפתוח מצלמה");
     }
   };
+
+  useEffect(() => {
+    if (cameraStarted && faceLandmarker) {
+      startGuidanceLoop();
+    }
+  }, [cameraStarted, faceLandmarker]);
 
   const stopCamera = () => {
     const video = videoRef.current;
@@ -87,32 +90,35 @@ export default function App() {
 
   const getBrightness = () => {
     const video = videoRef.current;
-    const canvas = canvasRef.current;
+    const canvas = sampleCanvasRef.current;
 
     if (!video || !canvas) return 0;
+    if (!video.videoWidth || !video.videoHeight) return 0;
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return 0;
 
-    const sampleWidth = 120;
-    const sampleHeight = 160;
+    const sampleWidth = 64;
+    const sampleHeight = 64;
 
     canvas.width = sampleWidth;
     canvas.height = sampleHeight;
+
     ctx.drawImage(video, 0, 0, sampleWidth, sampleHeight);
 
     const imageData = ctx.getImageData(0, 0, sampleWidth, sampleHeight).data;
 
     let total = 0;
+    const pixelCount = imageData.length / 4;
+
     for (let i = 0; i < imageData.length; i += 4) {
       const r = imageData[i];
       const g = imageData[i + 1];
       const b = imageData[i + 2];
-      total += (r + g + b) / 3;
+      total += 0.299 * r + 0.587 * g + 0.114 * b;
     }
 
-    const avg = total / (imageData.length / 4);
-    return avg;
+    return total / pixelCount;
   };
 
   const startGuidanceLoop = () => {
@@ -122,11 +128,12 @@ export default function App() {
       try {
         const video = videoRef.current;
         const results = faceLandmarker.detectForVideo(video, performance.now());
+
         const brightness = getBrightness();
         setBrightnessLevel(brightness);
 
         if (!results.faceLandmarks.length) {
-          setMessage("תמקם את הפנים בתוך המסגרת");
+          setMessage("תמקם את הפנים מול המצלמה");
           animationRef.current = requestAnimationFrame(run);
           return;
         }
@@ -139,38 +146,33 @@ export default function App() {
         const forehead = face[10];
         const chin = face[152];
 
-        const faceCenterX = nose.x;
-        const faceHeight = Math.abs(chin.y - forehead.y);
         const leftWidth = Math.abs(nose.x - leftCheek.x);
         const rightWidth = Math.abs(rightCheek.x - nose.x);
+        const faceHeight = Math.abs(chin.y - forehead.y);
 
-        const centerTolerance = 0.08;
-        const yawTolerance = 0.025;
+        const faceCenterX = nose.x;
+        const faceCenterY = nose.y;
 
-        const faceTop = forehead.y;
-        const faceBottom = chin.y;
-        const faceMidY = (faceTop + faceBottom) / 2;
-
-        if (faceCenterX < 0.42 - centerTolerance) {
+        if (faceCenterX < 0.42) {
           setMessage("תזיז את הפנים קצת ימינה");
-        } else if (faceCenterX > 0.58 + centerTolerance) {
+        } else if (faceCenterX > 0.58) {
           setMessage("תזיז את הפנים קצת שמאלה");
-        } else if (leftWidth > rightWidth + yawTolerance) {
+        } else if (leftWidth > rightWidth + 0.03) {
           setMessage("תסובב קצת ימינה");
-        } else if (rightWidth > leftWidth + yawTolerance) {
+        } else if (rightWidth > leftWidth + 0.03) {
           setMessage("תסובב קצת שמאלה");
-        } else if (nose.y < faceMidY - 0.03) {
+        } else if (faceCenterY < 0.42) {
           setMessage("תוריד קצת סנטר");
-        } else if (nose.y > faceMidY + 0.03) {
+        } else if (faceCenterY > 0.58) {
           setMessage("תרים קצת סנטר");
-        } else if (faceHeight < 0.30) {
+        } else if (faceHeight < 0.28) {
           setMessage("תתקרב קצת למצלמה");
-        } else if (brightness < 85) {
-          setMessage("התאורה חלשה — תפנה את הפנים לאור");
-        } else if (brightness > 210) {
+        } else if (brightness > 0 && brightness < 75) {
+          setMessage("התאורה חלשה — תפנה פנים למקור אור");
+        } else if (brightness > 220) {
           setMessage("יש יותר מדי אור — תזוז קצת מהאור");
         } else {
-          setMessage("מושלם — עכשיו תצלם ✅");
+          setMessage("זווית טובה — עכשיו תצלם ✅");
         }
       } catch (error) {
         console.error(error);
@@ -186,7 +188,7 @@ export default function App() {
   const takePhoto = () => {
     try {
       const video = videoRef.current;
-      const canvas = canvasRef.current;
+      const canvas = captureCanvasRef.current;
 
       if (!video || !canvas) {
         setMessage("אין מצלמה פעילה");
@@ -206,14 +208,14 @@ export default function App() {
       let contrastBoost = 1.05;
       let saturateBoost = 1.03;
 
-      if (brightnessLevel < 90) {
-        brightnessBoost = 1.22;
+      if (brightnessLevel > 0 && brightnessLevel < 90) {
+        brightnessBoost = 1.2;
         contrastBoost = 1.08;
         saturateBoost = 1.05;
       }
 
       if (brightnessLevel > 190) {
-        brightnessBoost = 0.95;
+        brightnessBoost = 0.96;
         contrastBoost = 1.02;
         saturateBoost = 1.02;
       }
@@ -224,7 +226,7 @@ export default function App() {
 
       const imageData = canvas.toDataURL("image/png");
       setCapturedImage(imageData);
-      setMessage("התמונה צולמה ונשמרה בתצוגה ✅");
+      setMessage("התמונה צולמה ✅");
     } catch (error) {
       console.error(error);
       setMessage("לא הצלחתי לצלם תמונה");
@@ -357,7 +359,8 @@ export default function App() {
           </button>
         </div>
 
-        <canvas ref={canvasRef} style={{ display: "none" }} />
+        <canvas ref={captureCanvasRef} style={{ display: "none" }} />
+        <canvas ref={sampleCanvasRef} style={{ display: "none" }} />
 
         {capturedImage && (
           <div style={{ marginTop: 16 }}>
