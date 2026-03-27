@@ -25,6 +25,9 @@ export default function App() {
   const lastSavedAtRef = useRef<number>(0);
   const candidatesRef = useRef<CandidateFrame[]>([]);
 
+  const autoCaptureStartRef = useRef<number | null>(null);
+  const autoCapturedRef = useRef(false);
+
   const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
   const [cameraStarted, setCameraStarted] = useState(false);
   const [message, setMessage] = useState("טוען מערכת AI...");
@@ -33,6 +36,7 @@ export default function App() {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isCollecting, setIsCollecting] = useState(false);
   const [framesCollected, setFramesCollected] = useState(0);
+  const [autoCaptureEnabled, setAutoCaptureEnabled] = useState(true);
 
   useEffect(() => {
     loadModel();
@@ -91,6 +95,9 @@ export default function App() {
         await videoRef.current.play();
       }
 
+      autoCaptureStartRef.current = null;
+      autoCapturedRef.current = false;
+      setCapturedImage(null);
       setCameraStarted(true);
       setMessage("המצלמה פועלת ✅");
     } catch (error) {
@@ -323,7 +330,47 @@ export default function App() {
 
       const analysis = analyzeFrame();
 
-      setMessage(analysis.message);
+      if (!isCollecting && !capturedImage && autoCaptureEnabled) {
+        if (analysis.score >= 85 && analysis.ready) {
+          if (!autoCaptureStartRef.current) {
+            autoCaptureStartRef.current = Date.now();
+          }
+
+          const heldTime = Date.now() - autoCaptureStartRef.current;
+
+          if (heldTime > 900 && !autoCapturedRef.current) {
+            autoCapturedRef.current = true;
+            const imageData = captureCurrentFrame(analysis);
+
+            if (imageData) {
+              setCapturedImage(imageData);
+              setScore(analysis.score);
+              setBrightness(Math.round(analysis.brightness));
+              setMessage("📸 צילמתי אוטומטית — זה נראה טוב!");
+            }
+          } else {
+            setMessage("מושלם... מחזיק עוד רגע 📸");
+          }
+        } else {
+          autoCaptureStartRef.current = null;
+          autoCapturedRef.current = false;
+        }
+      }
+
+      setMessage((prev) => {
+        if (
+          !isCollecting &&
+          !capturedImage &&
+          autoCaptureEnabled &&
+          analysis.score >= 85 &&
+          analysis.ready &&
+          !autoCapturedRef.current
+        ) {
+          return "מושלם... מחזיק עוד רגע 📸";
+        }
+        return analysis.message;
+      });
+
       setScore(analysis.score);
       setBrightness(Math.round(analysis.brightness));
 
@@ -366,6 +413,8 @@ export default function App() {
     setFramesCollected(0);
     setIsCollecting(true);
     setCapturedImage(null);
+    autoCaptureStartRef.current = null;
+    autoCapturedRef.current = false;
     setMessage("אוסף פריימים טובים... תישאר טבעי");
 
     if (collectionTimeoutRef.current) {
@@ -415,6 +464,13 @@ export default function App() {
     link.click();
   };
 
+  const resetShot = () => {
+    setCapturedImage(null);
+    autoCaptureStartRef.current = null;
+    autoCapturedRef.current = false;
+    setMessage("חזור לפריים ותן לי לכוון אותך");
+  };
+
   return (
     <div
       style={{
@@ -429,7 +485,7 @@ export default function App() {
     >
       <div
         style={{
-          width: 380,
+          width: 390,
           background: "white",
           borderRadius: 24,
           padding: 20,
@@ -449,18 +505,30 @@ export default function App() {
             marginBottom: 12,
           }}
         >
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              transform: "scaleX(-1)",
-            }}
-          />
+          {!capturedImage ? (
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transform: "scaleX(-1)",
+              }}
+            />
+          ) : (
+            <img
+              src={capturedImage}
+              alt="Best result"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+            />
+          )}
         </div>
 
         <div style={{ marginBottom: 8, fontWeight: 700, fontSize: 20 }}>
@@ -494,6 +562,7 @@ export default function App() {
             gap: 10,
             justifyContent: "center",
             flexWrap: "wrap",
+            marginBottom: 12,
           }}
         >
           <button
@@ -551,21 +620,42 @@ export default function App() {
           >
             Download
           </button>
+
+          <button
+            onClick={resetShot}
+            style={{
+              padding: "12px 16px",
+              borderRadius: 12,
+              border: "none",
+              background: "#f59e0b",
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            Reset
+          </button>
         </div>
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            fontSize: 14,
+            color: "#374151",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={autoCaptureEnabled}
+            onChange={(e) => setAutoCaptureEnabled(e.target.checked)}
+          />
+          צילום אוטומטי כשזה מושלם
+        </label>
 
         <canvas ref={captureCanvasRef} style={{ display: "none" }} />
         <canvas ref={sampleCanvasRef} style={{ display: "none" }} />
-
-        {capturedImage && (
-          <div style={{ marginTop: 16 }}>
-            <h3>Best Result</h3>
-            <img
-              src={capturedImage}
-              alt="Captured"
-              style={{ width: "100%", borderRadius: 16 }}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
